@@ -2,7 +2,13 @@
  * Background Service Worker: Security Firewall Inspection Engine
  * Inspects intercepted text payloads sent by content scripts.
  * Redacts/hashes sensitive content in-place before allowing submission.
+ *
+ * Multi-tier prompt firewall is handled by firewall-engine.js:
+ *   Tier 1 — Prompt Injection Check
+ *   Tier 2 — Data Exfiltration Check
+ *   Tier 3 — Privilege Escalation / Tool Abuse Check
  */
+import { evaluatePrompt } from './firewall-engine.js';
 
 // Initialize default firewall settings on installation
 chrome.runtime.onInstalled.addListener(async () => {
@@ -259,19 +265,52 @@ async function handlePayloadInspection(data, sender) {
     return { needsRedaction: false, sanitizedText: data?.text || '', reason: 'Firewall is currently bypassed.' };
   }
 
-  const text = data?.text || '';
+  const text   = data?.text || '';
   const origin = data?.origin || sender?.url || 'Unknown Origin';
+
+  // ── Multi-tier firewall check (Tier 1–3) ─────────────────────────────────
+  const firewallResult = evaluatePrompt(text, { earlyExit: true, verbose: true });
+
+  if (firewallResult.status === 'BLOCKED') {
+    console.warn(`[Firewall Engine] BLOCKED (${firewallResult.matchedRule}) — ${origin}`);
+
+    logInspectionEvent({
+      origin,
+      verdict:    'BLOCKED',
+      threats:    firewallResult.matches ?? [],
+      redactions: 0,
+      snippet:    text.length > 60 ? text.substring(0, 60) + '...' : text,
+      firewallResult
+    });
+
+    return {
+      needsRedaction: false,
+      sanitizedText:  text,
+      blocked:        true,
+      status:         firewallResult.status,
+      threatLevel:    firewallResult.threatLevel,
+      reason:         firewallResult.reason,
+      matchedRule:    firewallResult.matchedRule
+    };
+  }
+
+  // ── PII redaction pass (existing logic) ──────────────────────────────────
   const result = inspectAndRedact(text);
 
   logInspectionEvent({
     origin,
-    verdict: result.needsRedaction ? 'REDACTED' : 'CLEAN',
-    threats: result.detectedThreats,
-    redactions: result.redactionCount,
-    snippet: text.length > 60 ? text.substring(0, 60) + '...' : text
+    verdict:       result.needsRedaction ? 'REDACTED' : 'CLEAN',
+    threats:       result.detectedThreats,
+    redactions:    result.redactionCount,
+    snippet:       text.length > 60 ? text.substring(0, 60) + '...' : text,
+    firewallResult
   });
 
   console.log(`[Firewall Background] ${origin}: ${result.needsRedaction ? 'REDACTED ' + result.redactionCount + ' items' : 'CLEAN'}`);
 
-  return result;
+  return {
+    ...result,
+    firewallStatus:     firewallResult.status,
+    firewallThreatLevel: firewallResult.threatLevel
+  };
 }
