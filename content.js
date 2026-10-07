@@ -195,6 +195,12 @@
     try {
       const result = await inspectPayload(rawText);
 
+      // ── Firewall BLOCKED — hard stop, do not submit ──────────────────────
+      if (result.blocked) {
+        showBlockedNotice(result.reason || 'Submission blocked by Security Firewall.', result.matchedRule);
+        return;
+      }
+
       if (result.needsRedaction) {
         // Replace text in-place with hashed / sanitized values
         setSanitizedText(inputEl, result.sanitizedText);
@@ -251,6 +257,12 @@
     try {
       const result = await inspectPayload(rawText);
 
+      // ── Firewall BLOCKED — hard stop, do not submit ──────────────────────
+      if (result.blocked) {
+        showBlockedNotice(result.reason || 'Submission blocked by Security Firewall.', result.matchedRule);
+        return;
+      }
+
       if (result.needsRedaction) {
         setSanitizedText(inputEl, result.sanitizedText);
         showRedactionNotice(result.reason, result.redactionCount);
@@ -299,6 +311,63 @@
         }
       }, 50);
     }
+  }
+
+  /**
+   * Display floating BLOCKED notification toast (hard block — submission stopped)
+   */
+  function showBlockedNotice(reason, ruleId) {
+    const existing = document.getElementById('firewall-security-alert');
+    if (existing) existing.remove();
+
+    const alertBox = document.createElement('div');
+    alertBox.id = 'firewall-security-alert';
+    alertBox.style.cssText = `
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 2147483647;
+      background: linear-gradient(135deg, #1e1e2e 0%, #181825 100%);
+      color: #f38ba8;
+      border: 1px solid #f38ba8;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6), 0 0 20px rgba(243,139,168,0.2);
+      border-radius: 10px;
+      padding: 14px 18px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      max-width: 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      animation: firewall-slide-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    `;
+
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes firewall-slide-in {
+        from { opacity: 0; transform: translateY(20px) scale(0.95); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+      }
+    `;
+    alertBox.appendChild(style);
+
+    const titleRow = document.createElement('div');
+    titleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;font-weight:700;color:#f38ba8;';
+    titleRow.innerHTML = `
+      <span>🚫 Submission Blocked${ruleId ? ` [${ruleId}]` : ''}</span>
+      <button style="background:none;border:none;color:#a6adc8;cursor:pointer;font-size:18px;line-height:1;" id="firewall-close-btn">&times;</button>
+    `;
+
+    const body = document.createElement('div');
+    body.style.cssText = 'color:#cdd6f4;font-size:12px;line-height:1.5;';
+    body.textContent = reason;
+
+    alertBox.appendChild(titleRow);
+    alertBox.appendChild(body);
+    document.body.appendChild(alertBox);
+
+    document.getElementById('firewall-close-btn')?.addEventListener('click', () => alertBox.remove());
+    setTimeout(() => { if (alertBox.parentElement) alertBox.remove(); }, 8000);
   }
 
   /**

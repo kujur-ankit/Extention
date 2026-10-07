@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.runtime.sendMessage({ action: 'GET_STATUS' }, (res) => {
       if (!res) return;
 
-      const { firewallEnabled = true, redactedCount = 0, inspectionLogs = [] } = res;
+      const { firewallEnabled = true, redactedCount = 0, blockedCount = 0, inspectionLogs = [] } = res;
 
       toggle.checked = firewallEnabled;
       if (firewallEnabled) {
@@ -21,7 +21,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         statusText.textContent = 'Firewall Paused';
       }
 
-      blockedCountEl.textContent = `${redactedCount} inputs redacted`;
+      // Show persistent blocked + redacted counts from storage
+      const parts = [];
+      if (blockedCount > 0) parts.push(`${blockedCount} blocked`);
+      if (redactedCount > 0) parts.push(`${redactedCount} redacted`);
+      blockedCountEl.textContent = parts.length ? parts.join(' · ') : '0 threats detected';
+
       renderLogs(inspectionLogs);
     });
   }
@@ -33,18 +38,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     logList.innerHTML = logs.map(log => {
+      const isBlocked  = log.verdict === 'BLOCKED';
       const isRedacted = log.verdict === 'REDACTED';
-      const badgeClass = isRedacted ? 'blocked' : 'allowed';
-      const badgeLabel = isRedacted ? 'REDACTED' : 'CLEAN';
+      const badgeClass = isBlocked ? 'blocked' : (isRedacted ? 'blocked' : 'allowed');
+      const badgeLabel = isBlocked ? 'BLOCKED' : (isRedacted ? 'REDACTED' : 'CLEAN');
       const timeStr = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
       return `
-        <div class="log-item ${badgeClass}">
+        <div class="log-item ${isBlocked || isRedacted ? 'blocked' : 'allowed'}">
           <div class="log-header">
             <span>${escapeHtml(log.origin)}</span>
             <span class="badge ${badgeClass}">${badgeLabel}</span>
           </div>
           <div class="log-snippet">${escapeHtml(log.snippet || '')}</div>
+          ${isBlocked  ? `<div style="font-size:10px;color:#f38ba8;">Rule: ${escapeHtml(log.firewallResult?.matchedRule || 'N/A')}</div>` : ''}
           ${isRedacted ? `<div style="font-size:10px;color:#fab387;">${log.redactions || 0} item(s) hashed</div>` : ''}
           <div style="font-size: 10px; color: #a6adc8;">${timeStr}</div>
         </div>
