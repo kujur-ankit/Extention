@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Security Firewall</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="brand">
+        <span class="shield-icon">🛡️</span>
+        <div>
+          <h1>Security Firewall</h1>
+          <p class="subtitle">Input & Prompt DLP Inspector</p>
+        </div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="firewall-toggle" checked>
+        <span class="slider round"></span>
+      </label>
+    </header>
+
+    <div class="status-card" id="status-card">
+      <div class="status-indicator active" id="status-indicator"></div>
+      <div class="status-info">
+        <span class="status-text" id="status-text">Protection Active</span>
+        <span class="status-sub" id="blocked-count">0 threats blocked</span>
+      </div>
+    </div>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>Recent Interceptions</h2>
+        <button id="refresh-logs" class="btn-icon" title="Refresh">🔄</button>
+      </div>
+      <div class="log-list" id="log-list">
+        <div class="empty-state">No events captured yet.</div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>Manifest V3 • Prompt & DLP Firewall</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
