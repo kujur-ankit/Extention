@@ -2,15 +2,22 @@
  * Background Service Worker: Security Firewall Inspection Engine
  * Inspects intercepted text payloads sent by content scripts.
  * Redacts/hashes sensitive content in-place before allowing submission.
+ *
+ * Multi-tier prompt firewall is handled by firewall-engine.js:
+ *   Tier 1 — Prompt Injection Check
+ *   Tier 2 — Data Exfiltration Check
+ *   Tier 3 — Privilege Escalation / Tool Abuse Check
  */
+import { evaluatePrompt } from './firewall-engine.js';
 
 // Initialize default firewall settings on installation
 chrome.runtime.onInstalled.addListener(async () => {
-  const existing = await chrome.storage.local.get(['firewallEnabled', 'inspectionLogs', 'redactedCount']);
+  const existing = await chrome.storage.local.get(['firewallEnabled', 'inspectionLogs', 'redactedCount', 'blockedCount']);
   if (existing.firewallEnabled === undefined) {
     await chrome.storage.local.set({
       firewallEnabled: true,
       redactedCount: 0,
+      blockedCount: 0,
       inspectionLogs: []
     });
     console.log('[Firewall Background] Initialized default configuration.');
@@ -211,7 +218,7 @@ function inspectAndRedact(text) {
  */
 async function logInspectionEvent(eventData) {
   try {
-    const { inspectionLogs = [], redactedCount = 0 } = await chrome.storage.local.get(['inspectionLogs', 'redactedCount']);
+    const { inspectionLogs = [], redactedCount = 0, blockedCount = 0 } = await chrome.storage.local.get(['inspectionLogs', 'redactedCount', 'blockedCount']);
     const newLog = {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
@@ -219,11 +226,13 @@ async function logInspectionEvent(eventData) {
     };
 
     const updatedLogs = [newLog, ...inspectionLogs].slice(0, 50);
-    const updatedCount = eventData.verdict === 'REDACTED' ? redactedCount + 1 : redactedCount;
+    const updatedRedactedCount = eventData.verdict === 'REDACTED' ? redactedCount + 1 : redactedCount;
+    const updatedBlockedCount  = eventData.verdict === 'BLOCKED'  ? blockedCount + 1  : blockedCount;
 
     await chrome.storage.local.set({
       inspectionLogs: updatedLogs,
-      redactedCount: updatedCount
+      redactedCount: updatedRedactedCount,
+      blockedCount: updatedBlockedCount
     });
   } catch (err) {
     console.error('[Firewall Background] Error logging inspection:', err);
@@ -238,7 +247,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'GET_STATUS') {
-    chrome.storage.local.get(['firewallEnabled', 'redactedCount', 'inspectionLogs']).then(sendResponse);
+    chrome.storage.local.get(['firewallEnabled', 'redactedCount', 'blockedCount', 'inspectionLogs']).then(sendResponse);
     return true;
   }
 
@@ -259,19 +268,52 @@ async function handlePayloadInspection(data, sender) {
     return { needsRedaction: false, sanitizedText: data?.text || '', reason: 'Firewall is currently bypassed.' };
   }
 
-  const text = data?.text || '';
+  const text   = data?.text || '';
   const origin = data?.origin || sender?.url || 'Unknown Origin';
+
+  // ── Multi-tier firewall check (Tier 1–3) ─────────────────────────────────
+  const firewallResult = evaluatePrompt(text, { earlyExit: true, verbose: true });
+
+  if (firewallResult.status === 'BLOCKED') {
+    console.warn(`[Firewall Engine] BLOCKED (${firewallResult.matchedRule}) — ${origin}`);
+
+    logInspectionEvent({
+      origin,
+      verdict:    'BLOCKED',
+      threats:    firewallResult.matches ?? [],
+      redactions: 0,
+      snippet:    text.length > 60 ? text.substring(0, 60) + '...' : text,
+      firewallResult
+    });
+
+    return {
+      needsRedaction: false,
+      sanitizedText:  text,
+      blocked:        true,
+      status:         firewallResult.status,
+      threatLevel:    firewallResult.threatLevel,
+      reason:         firewallResult.reason,
+      matchedRule:    firewallResult.matchedRule
+    };
+  }
+
+  // ── PII redaction pass (existing logic) ──────────────────────────────────
   const result = inspectAndRedact(text);
 
   logInspectionEvent({
     origin,
-    verdict: result.needsRedaction ? 'REDACTED' : 'CLEAN',
-    threats: result.detectedThreats,
-    redactions: result.redactionCount,
-    snippet: text.length > 60 ? text.substring(0, 60) + '...' : text
+    verdict:       result.needsRedaction ? 'REDACTED' : 'CLEAN',
+    threats:       result.detectedThreats,
+    redactions:    result.redactionCount,
+    snippet:       text.length > 60 ? text.substring(0, 60) + '...' : text,
+    firewallResult
   });
 
   console.log(`[Firewall Background] ${origin}: ${result.needsRedaction ? 'REDACTED ' + result.redactionCount + ' items' : 'CLEAN'}`);
 
-  return result;
+  return {
+    ...result,
+    firewallStatus:     firewallResult.status,
+    firewallThreatLevel: firewallResult.threatLevel
+  };
 }
