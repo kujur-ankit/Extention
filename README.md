@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Security Firewall Chrome Extension (Manifest V3)
 
 A boilerplate Chrome Extension designed to detect and inspect input fields (standard inputs, textareas, and rich `contenteditable` chat containers) before submitting payloads.
@@ -19,3 +20,4 @@ A boilerplate Chrome Extension designed to detect and inspect input fields (stan
 4. Test on any webpage with text fields or chat boxes (such as ChatGPT, Claude, or any web form):
    - **Safe input**: Pressing `Enter` or clicking submit will proceed normally.
    - **Test Threat / Blocked input**: Try typing a dummy secret like `sk-1234567890abcdef1234567890abcdef` or `-----BEGIN PRIVATE KEY-----` and press `Enter` to see the firewall block the submission and display a security alert.
+
