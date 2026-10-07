@@ -12,10 +12,11 @@ import { evaluatePrompt } from './firewall-engine.js';
 
 // Initialize default firewall settings on installation
 chrome.runtime.onInstalled.addListener(async () => {
-  const existing = await chrome.storage.local.get(['firewallEnabled', 'inspectionLogs', 'redactedCount', 'blockedCount']);
+  const existing = await chrome.storage.local.get(['firewallEnabled', 'inspectionLogs', 'scannedCount', 'redactedCount', 'blockedCount']);
   if (existing.firewallEnabled === undefined) {
     await chrome.storage.local.set({
       firewallEnabled: true,
+      scannedCount: 0,
       redactedCount: 0,
       blockedCount: 0,
       inspectionLogs: []
@@ -218,7 +219,7 @@ function inspectAndRedact(text) {
  */
 async function logInspectionEvent(eventData) {
   try {
-    const { inspectionLogs = [], redactedCount = 0, blockedCount = 0 } = await chrome.storage.local.get(['inspectionLogs', 'redactedCount', 'blockedCount']);
+    const { inspectionLogs = [], scannedCount = 0, redactedCount = 0, blockedCount = 0 } = await chrome.storage.local.get(['inspectionLogs', 'scannedCount', 'redactedCount', 'blockedCount']);
     const newLog = {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
@@ -226,11 +227,13 @@ async function logInspectionEvent(eventData) {
     };
 
     const updatedLogs = [newLog, ...inspectionLogs].slice(0, 50);
+    const updatedScannedCount  = scannedCount + 1;
     const updatedRedactedCount = eventData.verdict === 'REDACTED' ? redactedCount + 1 : redactedCount;
     const updatedBlockedCount  = eventData.verdict === 'BLOCKED'  ? blockedCount + 1  : blockedCount;
 
     await chrome.storage.local.set({
       inspectionLogs: updatedLogs,
+      scannedCount: updatedScannedCount,
       redactedCount: updatedRedactedCount,
       blockedCount: updatedBlockedCount
     });
@@ -247,7 +250,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'GET_STATUS') {
-    chrome.storage.local.get(['firewallEnabled', 'redactedCount', 'blockedCount', 'inspectionLogs']).then(sendResponse);
+    chrome.storage.local.get(['firewallEnabled', 'scannedCount', 'redactedCount', 'blockedCount', 'inspectionLogs']).then(sendResponse);
     return true;
   }
 
