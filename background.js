@@ -17,65 +17,130 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
-// ── PII / Sensitive Data Patterns ──────────────────────────────────────────
-// Each pattern uses the global flag so we can find ALL matches and replace them.
+// ── PII / Sensitive Data & Threat Patterns ──────────────────────────────────
+// ORDER MATTERS: longer / more specific patterns first to avoid partial matches.
 const SECURITY_PATTERNS = [
+
+  // ── 1. CRYPTOGRAPHIC KEYS ────────────────────────────────────────────────
   {
-    id: 'phone_number',
-    name: 'Phone Number',
-    severity: 'High',
-    // Matches 10-digit Indian numbers, international +XX formats, US formats, etc.
-    regex: /(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}\b/g,
-    hash: (match) => hashValue(match, 'PHONE')
-  },
-  {
-    id: 'email_address',
-    name: 'Email Address',
-    severity: 'High',
-    regex: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
-    hash: (match) => hashValue(match, 'EMAIL')
-  },
-  {
-    id: 'aadhaar_number',
-    name: 'Aadhaar Number (India)',
+    id: 'private_key',
+    name: 'Private Key Block',
     severity: 'Critical',
-    regex: /\b\d{4}\s?\d{4}\s?\d{4}\b/g,
-    hash: (match) => hashValue(match, 'AADHAAR')
+    regex: /-----BEGIN\s+[A-Z0-9\s_-]+KEY-----[\s\S]*?-----END\s+[A-Z0-9\s_-]+KEY-----/gi,
+    hash: () => '[REDACTED:PRIVATE_KEY]'
   },
+
+  // ── 2. API KEYS & TOKENS ────────────────────────────────────────────────
   {
-    id: 'ssn',
-    name: 'Social Security Number (US)',
-    severity: 'Critical',
-    regex: /\b\d{3}-\d{2}-\d{4}\b/g,
-    hash: (match) => hashValue(match, 'SSN')
+    id: 'api_key_secret',
+    name: 'API Key / Secret Token',
+    severity: 'High',
+    // OpenAI (sk-..., sk-proj-..., sk-ant-...), GitHub (ghp_, gho_, ghu_, ghs_, ghr_, github_pat_),
+    // Google (AIza...), AWS (AKIA/ASIA), Slack (xox...), HuggingFace (hf_), Stripe (sk_live_, pk_live_),
+    // Twilio, SendGrid (SG.), Firebase, Vercel, JWTs, and generic key=value pairs
+    regex: /(?:\b(?:sk-(?:proj-|svcacct-|ant-)?[a-zA-Z0-9_\-]{10,})\b|\b(?:gh[pousr]_[a-zA-Z0-9]{16,}|github_pat_[a-zA-Z0-9_]{20,})\b|\bAIza[0-9A-Za-z\-_]{30,}\b|\b(?:AKIA|ASIA)[0-9A-Z]{16}\b|\bxox[baprs]-[0-9a-zA-Z\-]{10,48}\b|\bhf_[a-zA-Z0-9]{20,}\b|\b(?:sk_live_|pk_live_|rk_live_)[a-zA-Z0-9]{20,}\b|\bSG\.[a-zA-Z0-9_\-]{20,}\.[a-zA-Z0-9_\-]{20,}\b|\beyJ[a-zA-Z0-9_\-]{8,}\.eyJ[a-zA-Z0-9_\-]{8,}\.[a-zA-Z0-9_\-]{8,}\b|(?:\b(?:api[_\-\s]?key|secret[_\-\s]?key|access[_\-\s]?key|access[_\-\s]?token|auth[_\-\s]?token|bearer|token|password|passwd|secret)\s*[:=]\s*['"]?([a-zA-Z0-9_\-\.]{10,})['"]?\b))/gi,
+    hash: (match) => hashValue(match, 'SECRET')
   },
+
+  // ── 3. CREDIT / DEBIT CARD NUMBERS ──────────────────────────────────────
   {
     id: 'credit_card',
     name: 'Payment Card Number',
     severity: 'High',
-    regex: /\b(?:\d{4}[ -]?){3}\d{4}\b/g,
+    // 16 digits grouped by 4 with optional spaces/dashes, or a plain 16-digit run
+    regex: /\b(?:\d{4}[ \-]){3}\d{4}\b|\b\d{16}\b/g,
     hash: (match) => hashValue(match, 'CARD')
   },
+
+  // ── 4. NATIONAL ID: AADHAAR (India) ─────────────────────────────────────
   {
-    id: 'api_key_secret',
-    name: 'Exposed Secret / API Key',
-    severity: 'High',
-    regex: /(?:sk-[a-zA-Z0-9]{32,}|ghp_[a-zA-Z0-9]{36}|AIza[0-9A-Za-z-_]{35}|xox[baprs]-[0-9a-zA-Z]{10,48})/gi,
-    hash: (match) => hashValue(match, 'SECRET')
-  },
-  {
-    id: 'private_key',
-    name: 'Private Key Header',
+    id: 'aadhaar_number',
+    name: 'Aadhaar Number (India)',
     severity: 'Critical',
-    regex: /-----BEGIN\s+(?:RSA|OPENSSH|EC|DSA|PRIVATE)\s+KEY-----[\s\S]*?-----END\s+\w+\s+KEY-----/gi,
-    hash: (match) => '[REDACTED:PRIVATE_KEY]'
+    // 12 digits with optional space/dash separators: "1234 5678 9012" or "1234-5678-9012" or "123456789012"
+    regex: /\b\d{4}[ \-]?\d{4}[ \-]?\d{4}\b/g,
+    hash: (match) => hashValue(match, 'AADHAAR')
   },
+
+  // ── 5. PAN CARD (India) ─────────────────────────────────────────────────
+  {
+    id: 'pan_card',
+    name: 'PAN Card (India)',
+    severity: 'High',
+    // Format: ABCDE1234F (5 letters, 4 digits, 1 letter)
+    regex: /\b[A-Z]{5}\d{4}[A-Z]\b/g,
+    hash: (match) => hashValue(match, 'PAN')
+  },
+
+  // ── 6. SSN (US) ─────────────────────────────────────────────────────────
+  {
+    id: 'ssn',
+    name: 'Social Security Number (US)',
+    severity: 'Critical',
+    // Formats: "123-45-6789", "123 45 6789", "123456789"
+    regex: /\b\d{3}[ \-]?\d{2}[ \-]?\d{4}\b/g,
+    hash: (match) => hashValue(match, 'SSN')
+  },
+
+  // ── 7. PASSPORT NUMBER ──────────────────────────────────────────────────
+  {
+    id: 'passport',
+    name: 'Passport Number',
+    severity: 'High',
+    // Indian passports (e.g., A1234567, J1234567) and general alpha-numeric 6-9 char passports
+    regex: /\b[A-Z][0-9]{7}\b/g,
+    hash: (match) => hashValue(match, 'PASSPORT')
+  },
+
+  // ── 8. EMAIL ADDRESS ────────────────────────────────────────────────────
+  {
+    id: 'email_address',
+    name: 'Email Address',
+    severity: 'High',
+    regex: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
+    hash: (match) => hashValue(match, 'EMAIL')
+  },
+
+  // ── 9. PHONE NUMBERS (broadly international) ────────────────────────────
+  {
+    id: 'phone_number',
+    name: 'Phone Number',
+    severity: 'High',
+    // Catches:
+    //   +91 98765 43210   |  +91-9876543210  |  +919876543210  |  9876543210
+    //   +1 (555) 123-4567 |  555-123-4567    |  (555) 123 4567
+    //   +44 7911 123456   |  +61 4XX XXX XXX |  and many more
+    regex: /(?:\+\d{1,3}[\s.\-]?)?(?:\(\d{1,4}\)[\s.\-]?)?\d{2,5}[\s.\-]?\d{2,5}[\s.\-]?\d{2,5}\b/g,
+    hash: (match) => hashValue(match, 'PHONE')
+  },
+
+  // ── 10. IBAN (International Bank Account Number) ─────────────────────────
+  {
+    id: 'iban',
+    name: 'IBAN Number',
+    severity: 'High',
+    // Starts with 2 country letters + 2 check digits, then up to 30 alphanumeric characters
+    regex: /\b[A-Z]{2}\d{2}[ ]?[\dA-Z]{4}[ ]?[\dA-Z]{4}[ ]?[\dA-Z]{4}(?:[ ]?[\dA-Z]{4}){0,5}\b/g,
+    hash: (match) => hashValue(match, 'IBAN')
+  },
+
+  // ── 11. IP ADDRESS ──────────────────────────────────────────────────────
   {
     id: 'ip_address',
     name: 'IP Address',
     severity: 'Medium',
-    regex: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,
+    regex: /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g,
     hash: (match) => hashValue(match, 'IP')
+  },
+
+  // ── 12. DATABASE / CONNECTION STRINGS ────────────────────────────────────
+  {
+    id: 'connection_string',
+    name: 'Database Connection String',
+    severity: 'Critical',
+    // mongodb://, postgres://, mysql://, redis:// with embedded credentials
+    regex: /(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis|amqp|ftp)s?:\/\/[^\s"'`]+/gi,
+    hash: () => '[REDACTED:CONNECTION_STRING]'
   }
 ];
 

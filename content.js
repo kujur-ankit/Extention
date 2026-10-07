@@ -1,217 +1,156 @@
 /**
  * Content Script: Security Firewall Interceptor
- * Captures submissions from textareas, inputs, and contenteditable elements,
- * sends content to background for inspection, and REPLACES sensitive data
- * with hashed/redacted tokens before allowing submission to proceed.
+ * Intercepts submissions across standard inputs, textareas, and rich contenteditable
+ * containers (such as ChatGPT ProseMirror, Claude Lexical, and web forms).
+ * Redacts/hashes sensitive data in-place and securely triggers submission with sanitized content.
  */
 
 (() => {
-  const approvedActions = new WeakSet();
+  const approvedEvents = new WeakSet();
+  let isProcessing = false;
 
   const INPUT_SELECTORS = [
-    'textarea',
-    'input[type="text"]',
-    'input[type="search"]',
+    '#prompt-textarea',
+    '.ProseMirror',
     '[contenteditable="true"]',
     '[contenteditable=""]',
     '[contenteditable="plaintext-only"]',
-    '[role="textbox"]'
+    '[role="textbox"]',
+    'textarea',
+    'input[type="text"]',
+    'input[type="search"]',
+    'input:not([type])'
   ];
 
-  const SUBMIT_BUTTON_SELECTORS = [
-    'button[type="submit"]',
-    'input[type="submit"]',
+  const SEND_BUTTON_SELECTORS = [
+    'button[data-testid*="send" i]',
+    'button[data-testid*="submit" i]',
     'button[aria-label*="send" i]',
     'button[aria-label*="submit" i]',
-    'button[data-testid*="send" i]',
     'button[id*="send" i]',
-    'button[class*="send" i]'
+    'button[class*="send" i]',
+    'button[type="submit"]',
+    'input[type="submit"]',
+    '[role="button"][aria-label*="send" i]'
   ];
 
   /**
-   * Find the nearest input/chat element relative to a target
+   * Find the active or target input element
    */
-  function findNearestInput(element) {
-    if (!element) return null;
+  function findTargetInput(fromElement) {
+    if (!fromElement) {
+      fromElement = document.activeElement;
+    }
 
-    // Is the element itself an input?
+    // Check if the element itself matches
     for (const sel of INPUT_SELECTORS) {
-      if (element.matches?.(sel)) return element;
+      if (fromElement?.matches?.(sel)) return fromElement;
     }
 
-    // Walk up to find a form or container, then search within
-    const form = element.closest('form');
-    if (form) {
-      const inp = form.querySelector(INPUT_SELECTORS.join(','));
-      if (inp) return inp;
-    }
+    // Check inside nearest form or container
+    const container = fromElement?.closest?.(
+      'form, div[class*="chat" i], div[class*="prompt" i], div[class*="input" i], div[class*="composer" i], main, section, [role="main"]'
+    ) || document;
 
-    const container = element.closest(
-      'div[class*="chat" i], div[class*="prompt" i], div[class*="input" i], div[class*="composer" i], main, section'
-    );
-    if (container) {
-      const inp = container.querySelector(INPUT_SELECTORS.join(','));
-      if (inp) return inp;
+    const inp = container.querySelector?.(INPUT_SELECTORS.join(','));
+    if (inp) return inp;
+
+    // Fallback to activeElement if editable
+    if (document.activeElement && isEditableElement(document.activeElement)) {
+      return document.activeElement;
     }
 
     return null;
   }
 
-  function isTargetInput(element) {
-    if (!element || !(element instanceof Element)) return false;
-    return INPUT_SELECTORS.some(sel => element.matches(sel));
+  function isEditableElement(el) {
+    if (!el || !(el instanceof Element)) return false;
+    return (
+      el instanceof HTMLInputElement ||
+      el instanceof HTMLTextAreaElement ||
+      el.isContentEditable ||
+      el.getAttribute('contenteditable') !== null ||
+      el.getAttribute('role') === 'textbox'
+    );
   }
 
   /**
-   * Extract text from an input element
+   * Extract raw text from any input or rich editor
    */
-  function getTextFromInput(el) {
+  function getText(el) {
     if (!el) return '';
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
       return el.value || '';
     }
+    // For rich editors (ProseMirror, Lexical, contenteditable)
     return el.innerText || el.textContent || '';
   }
 
   /**
-   * Write sanitized text back into the input element
+   * Universal text replacer that works with ProseMirror (ChatGPT), Lexical (Claude),
+   * React controlled inputs, and standard HTML elements.
    */
-  function setTextOnInput(el, text) {
+  function setSanitizedText(el, newText) {
     if (!el) return;
 
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-      // Use native setter to trigger React/Angular/Vue change detection
-      const nativeSetter = Object.getOwnPropertyDescriptor(
-        el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
-        'value'
-      )?.set;
-
-      if (nativeSetter) {
-        nativeSetter.call(el, text);
+      // Use prototype setter to trigger React/framework change detection
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (setter) {
+        setter.call(el, newText);
       } else {
-        el.value = text;
+        el.value = newText;
       }
-
-      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertReplacementText' }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
     } else {
-      // contenteditable
-      el.innerText = text;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  }
+      // Rich text / ProseMirror / contenteditable
+      el.focus();
 
-  /**
-   * Intercept 'Enter' key on text fields
-   */
-  async function handleKeyDown(event) {
-    if (event.key !== 'Enter' || event.shiftKey) return;
-    if (!isTargetInput(event.target)) return;
-    if (approvedActions.has(event)) return;
+      try {
+        // Use Selection + execCommand('insertText') so ProseMirror synchronously updates its state model
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        sel.removeAllRanges();
+        sel.addRange(range);
 
-    const target = event.target;
-    const payload = getTextFromInput(target).trim();
-    if (!payload) return;
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-
-    const result = await inspectWithBackground(payload);
-
-    if (result.needsRedaction) {
-      // Replace content in the field with the sanitized version
-      setTextOnInput(target, result.sanitizedText);
-      showRedactionNotice(result.reason, result.redactionCount);
-    }
-
-    // Re-dispatch the Enter key to let it proceed (with original or redacted text)
-    const newEvent = new KeyboardEvent('keydown', {
-      key: 'Enter',
-      code: 'Enter',
-      keyCode: 13,
-      which: 13,
-      bubbles: true,
-      cancelable: true,
-      composed: true
-    });
-    approvedActions.add(newEvent);
-    target.dispatchEvent(newEvent);
-  }
-
-  /**
-   * Intercept clicks on send / submit buttons
-   */
-  async function handleClick(event) {
-    const target = event.target.closest('button, input[type="submit"], [role="button"]');
-    if (!target) return;
-
-    const isSubmit = SUBMIT_BUTTON_SELECTORS.some(sel => target.matches(sel)) || target.type === 'submit';
-    if (!isSubmit) return;
-    if (approvedActions.has(event)) return;
-
-    const inputEl = findNearestInput(target);
-    const payload = getTextFromInput(inputEl).trim();
-    if (!payload) return;
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-
-    const result = await inspectWithBackground(payload);
-
-    if (result.needsRedaction) {
-      setTextOnInput(inputEl, result.sanitizedText);
-      showRedactionNotice(result.reason, result.redactionCount);
-    }
-
-    // Re-trigger click
-    const newEvent = new MouseEvent('click', {
-      bubbles: true,
-      cancelable: true,
-      composed: true
-    });
-    approvedActions.add(newEvent);
-    target.dispatchEvent(newEvent);
-  }
-
-  /**
-   * Intercept standard form submit events
-   */
-  async function handleSubmit(event) {
-    const form = event.target;
-    if (approvedActions.has(form)) return;
-
-    const inputs = form.querySelectorAll(INPUT_SELECTORS.join(','));
-    let anyRedacted = false;
-
-    for (const inp of inputs) {
-      const payload = getTextFromInput(inp).trim();
-      if (!payload) continue;
-
-      const result = await inspectWithBackground(payload);
-      if (result.needsRedaction) {
-        setTextOnInput(inp, result.sanitizedText);
-        anyRedacted = true;
-        showRedactionNotice(result.reason, result.redactionCount);
+        const success = document.execCommand('insertText', false, newText);
+        if (!success) {
+          el.innerText = newText;
+        }
+      } catch {
+        el.innerText = newText;
       }
+
+      // Dispatch input events
+      el.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertReplacementText',
+        data: newText
+      }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
     }
+  }
 
-    if (!anyRedacted) {
-      // Nothing to redact, let it go through
-      return;
+  /**
+   * Locate the nearest send / submit button
+   */
+  function findSendButton(relativeEl) {
+    const root = relativeEl?.closest?.('form, div[class*="chat" i], div[class*="prompt" i], div[class*="composer" i], main, body') || document.body;
+    for (const sel of SEND_BUTTON_SELECTORS) {
+      const btn = root.querySelector(sel);
+      if (btn && btn.offsetParent !== null) return btn;
     }
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-
-    // Re-submit with sanitized content
-    approvedActions.add(form);
-    form.submit();
+    return null;
   }
 
   /**
    * Request inspection from background service worker
    */
-  function inspectWithBackground(text) {
+  function inspectPayload(text) {
     return new Promise((resolve) => {
       try {
         chrome.runtime.sendMessage(
@@ -221,7 +160,6 @@
           },
           (response) => {
             if (chrome.runtime.lastError || !response) {
-              console.warn('[Firewall Content] Inspection unavailable:', chrome.runtime.lastError);
               resolve({ needsRedaction: false, sanitizedText: text });
             } else {
               resolve(response);
@@ -229,14 +167,142 @@
           }
         );
       } catch (err) {
-        console.error('[Firewall Content] Message error:', err);
+        console.error('[Firewall Content] Error communicating with background:', err);
         resolve({ needsRedaction: false, sanitizedText: text });
       }
     });
   }
 
   /**
-   * Display redaction notification toast
+   * Handle Enter key press
+   */
+  async function handleKeyDown(event) {
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+    if (approvedEvents.has(event)) return;
+    if (isProcessing) return;
+
+    const inputEl = findTargetInput(event.target);
+    if (!inputEl) return;
+
+    const rawText = getText(inputEl).trim();
+    if (!rawText) return;
+
+    // Prevent original Enter submission while inspecting
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    isProcessing = true;
+
+    try {
+      const result = await inspectPayload(rawText);
+
+      if (result.needsRedaction) {
+        // Replace text in-place with hashed / sanitized values
+        setSanitizedText(inputEl, result.sanitizedText);
+        showRedactionNotice(result.reason, result.redactionCount);
+
+        // Allow UI frameworks (React, ProseMirror) to reconcile state
+        await new Promise((r) => setTimeout(r, 60));
+      }
+
+      // Trigger submission with sanitized text
+      const sendBtn = findSendButton(inputEl);
+      if (sendBtn && !sendBtn.disabled) {
+        approvedEvents.add(sendBtn);
+        sendBtn.click();
+      } else {
+        // Re-dispatch synthetic Enter event
+        const enterEvent = new KeyboardEvent('keydown', {
+          key: 'Enter',
+          code: 'Enter',
+          keyCode: 13,
+          which: 13,
+          bubbles: true,
+          cancelable: true,
+          composed: true
+        });
+        approvedEvents.add(enterEvent);
+        inputEl.dispatchEvent(enterEvent);
+      }
+    } finally {
+      isProcessing = false;
+    }
+  }
+
+  /**
+   * Handle Send Button click
+   */
+  async function handleClick(event) {
+    if (approvedEvents.has(event.target) || approvedEvents.has(event)) return;
+    if (isProcessing) return;
+
+    const btn = event.target.closest?.(SEND_BUTTON_SELECTORS.join(','));
+    if (!btn) return;
+
+    const inputEl = findTargetInput(btn);
+    if (!inputEl) return;
+
+    const rawText = getText(inputEl).trim();
+    if (!rawText) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    isProcessing = true;
+
+    try {
+      const result = await inspectPayload(rawText);
+
+      if (result.needsRedaction) {
+        setSanitizedText(inputEl, result.sanitizedText);
+        showRedactionNotice(result.reason, result.redactionCount);
+        await new Promise((r) => setTimeout(r, 60));
+      }
+
+      approvedEvents.add(btn);
+      btn.click();
+    } finally {
+      isProcessing = false;
+    }
+  }
+
+  /**
+   * Handle standard Form Submit
+   */
+  async function handleSubmit(event) {
+    const form = event.target;
+    if (approvedEvents.has(form)) return;
+    if (isProcessing) return;
+
+    const inputs = form.querySelectorAll(INPUT_SELECTORS.join(','));
+    let anyRedacted = false;
+
+    for (const inp of inputs) {
+      const rawText = getText(inp).trim();
+      if (!rawText) continue;
+
+      const result = await inspectPayload(rawText);
+      if (result.needsRedaction) {
+        setSanitizedText(inp, result.sanitizedText);
+        anyRedacted = true;
+        showRedactionNotice(result.reason, result.redactionCount);
+      }
+    }
+
+    if (anyRedacted) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      approvedEvents.add(form);
+      setTimeout(() => {
+        if (typeof form.requestSubmit === 'function') {
+          form.requestSubmit();
+        } else {
+          form.submit();
+        }
+      }, 50);
+    }
+  }
+
+  /**
+   * Display floating redaction notification toast
    */
   function showRedactionNotice(reason, count) {
     const existing = document.getElementById('firewall-security-alert');
@@ -257,7 +323,7 @@
       padding: 14px 18px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       font-size: 14px;
-      max-width: 400px;
+      max-width: 420px;
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -276,7 +342,7 @@
     const titleRow = document.createElement('div');
     titleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;font-weight:700;color:#f9e2af;';
     titleRow.innerHTML = `
-      <span>🛡️ Sensitive Data Redacted (${count})</span>
+      <span>🛡️ Sensitive Data Sanitized (${count})</span>
       <button style="background:none;border:none;color:#a6adc8;cursor:pointer;font-size:18px;line-height:1;" id="firewall-close-btn">&times;</button>
     `;
 
@@ -289,13 +355,13 @@
     document.body.appendChild(alertBox);
 
     document.getElementById('firewall-close-btn')?.addEventListener('click', () => alertBox.remove());
-    setTimeout(() => { if (alertBox.parentElement) alertBox.remove(); }, 5000);
+    setTimeout(() => { if (alertBox.parentElement) alertBox.remove(); }, 6000);
   }
 
-  // Register capture-phase listeners
+  // Register capture-phase listeners on window
   window.addEventListener('keydown', handleKeyDown, true);
   window.addEventListener('click', handleClick, true);
   window.addEventListener('submit', handleSubmit, true);
 
-  console.log('[Firewall Content Script] Active — monitoring and redacting sensitive inputs.');
+  console.log('[Firewall Content Script] Protection Active — intercepting and sanitizing prompts before sending.');
 })();
