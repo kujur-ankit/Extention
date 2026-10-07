@@ -120,7 +120,7 @@ const PROMPT_INJECTION_RULES = [
     name: 'Direct Override Phrase',
     description: 'Phrases that directly instruct the model to ignore its guidelines.',
     severity: 5,
-    pattern: /\b(ignore\s+(all\s+)?(previous|prior|above|earlier|original|system)\s+(instructions?|prompts?|guidelines?|rules?|constraints?|context))\b/,
+    pattern: /\b((ignore|disregard|forget|bypass|override)\s+(all\s+)?(your\s+|the\s+)?(previous|prior|above|earlier|original|system)\s+(instructions?|prompts?|guidelines?|rules?|constraints?|context))\b/,
     detect: null
   },
   {
@@ -370,7 +370,7 @@ const PRIVILEGE_ESCALATION_RULES = [
     name: 'Shell Command Execution',
     description: 'Direct invocation of shell interpreters or exec-style calls.',
     severity: 5,
-    pattern: /\b(exec\s*\(|eval\s*\(|os\.system\s*\(|subprocess\.(run|call|popen|check_output)\s*\(|shell_exec\s*\(|passthru\s*\(|system\s*\(|popen\s*\(|proc_open\s*\()\b/i,
+    pattern: /\b(exec\s*\(|eval\s*\(|os\.system\s*\(|subprocess\.(run|call|popen|check_output)\s*\(|shell_exec\s*\(|passthru\s*\(|system\s*\(|popen\s*\(|proc_open\s*\()/i,
     detect: null
   },
   {
@@ -386,7 +386,7 @@ const PRIVILEGE_ESCALATION_RULES = [
     name: 'Sensitive File Access',
     description: 'Attempts to read system-critical files.',
     severity: 5,
-    pattern: /\b(\/etc\/(passwd|shadow|sudoers|hosts|ssh\/|crontab)|~?\/?\.env|~?\/?\.aws\/(credentials|config)|~?\/?\.ssh\/(id_rsa|authorized_keys)|\/proc\/self\/(environ|mem|maps)|\/var\/log\/)/i,
+    pattern: /(?:^|[\s"'`(=])(\/etc\/(passwd|shadow|sudoers|hosts|ssh\/|crontab)|~?\/?\.env|~?\/?\.aws\/(credentials|config)|~?\/?\.ssh\/(id_rsa|authorized_keys)|\/proc\/self\/(environ|mem|maps)|\/var\/log\/)/i,
     detect: null
   },
   {

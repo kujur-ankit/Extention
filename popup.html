@@ -3,48 +3,113 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Security Firewall</title>
+  <title>Security Firewall Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="container">
+
+    <!-- ── Header ──────────────────────────────────────────────── -->
     <header class="header">
       <div class="brand">
-        <span class="shield-icon">🛡️</span>
-        <div>
-          <h1>Security Firewall</h1>
-          <p class="subtitle">Input & Prompt DLP Inspector</p>
+        <div class="brand-icon">🛡️</div>
+        <div class="brand-text">
+          <h1>Agent Firewall</h1>
+          <p class="subtitle">Prompt &amp; DLP Security Engine</p>
         </div>
       </div>
-      <label class="switch">
+      <label class="toggle-wrap" title="Enable / Disable Firewall">
         <input type="checkbox" id="firewall-toggle" checked>
-        <span class="slider round"></span>
+        <span class="slider"></span>
       </label>
     </header>
 
+    <!-- ── Status Bar ───────────────────────────────────────────── -->
     <div class="status-card" id="status-card">
-      <div class="status-indicator active" id="status-indicator"></div>
+      <div class="status-dot" id="status-dot"></div>
       <div class="status-info">
-        <span class="status-text" id="status-text">Protection Active</span>
-        <span class="status-sub" id="blocked-count">0 threats blocked</span>
+        <span class="status-label" id="status-text">Protection Active</span>
+        <span class="status-sub" id="status-sub">Monitoring all inputs</span>
+      </div>
+      <div class="status-badge" id="status-badge">LIVE</div>
+    </div>
+
+    <!-- ── Stats Row ────────────────────────────────────────────── -->
+    <div class="stats-row">
+      <div class="stat-card" id="stat-scanned">
+        <div class="stat-icon">🔍</div>
+        <div class="stat-value" id="val-scanned">0</div>
+        <div class="stat-label">Prompts Scanned</div>
+      </div>
+      <div class="stat-card danger" id="stat-blocked">
+        <div class="stat-icon">🚫</div>
+        <div class="stat-value" id="val-blocked">0</div>
+        <div class="stat-label">Threats Blocked</div>
+      </div>
+      <div class="stat-card warn" id="stat-redacted">
+        <div class="stat-icon">✂️</div>
+        <div class="stat-value" id="val-redacted">0</div>
+        <div class="stat-label">PII Redacted</div>
       </div>
     </div>
 
-    <section class="section">
-      <div class="section-header">
-        <h2>Recent Interceptions</h2>
-        <button id="refresh-logs" class="btn-icon" title="Refresh">🔄</button>
+    <!-- ── Tier Coverage ────────────────────────────────────────── -->
+    <div class="coverage-bar-section">
+      <div class="section-title">
+        <span>Attack Mitigation Rate</span>
+        <span class="pct-badge" id="mitigation-pct">— %</span>
       </div>
+      <div class="coverage-track">
+        <div class="coverage-fill" id="coverage-fill" style="width:0%"></div>
+      </div>
+      <div class="tier-labels">
+        <span>Tier 1 · Injection</span>
+        <span>Tier 2 · Exfiltration</span>
+        <span>Tier 3 · Escalation</span>
+      </div>
+    </div>
+
+    <!-- ── Audit Log ─────────────────────────────────────────────── -->
+    <section class="log-section">
+      <div class="section-header">
+        <div class="section-title-row">
+          <span class="section-title">Security Audit Log</span>
+          <span class="log-count-badge" id="log-count">0 events</span>
+        </div>
+        <div class="log-actions">
+          <button class="btn-icon" id="btn-filter" title="Filter" aria-pressed="false">⚙</button>
+          <button class="btn-icon" id="btn-clear" title="Clear Logs">🗑</button>
+          <button class="btn-icon" id="btn-refresh" title="Refresh">↻</button>
+        </div>
+      </div>
+
+      <!-- Filter strip (hidden by default) -->
+      <div class="filter-strip" id="filter-strip" hidden>
+        <button class="filter-btn active" data-filter="ALL">All</button>
+        <button class="filter-btn" data-filter="BLOCKED">Blocked</button>
+        <button class="filter-btn" data-filter="REDACTED">Redacted</button>
+        <button class="filter-btn" data-filter="CLEAN">Clean</button>
+      </div>
+
       <div class="log-list" id="log-list">
-        <div class="empty-state">No events captured yet.</div>
+        <div class="empty-state">
+          <div class="empty-icon">📋</div>
+          <p>No events captured yet.</p>
+          <small>Submit a prompt on any page to begin scanning.</small>
+        </div>
       </div>
     </section>
 
+    <!-- ── Footer ────────────────────────────────────────────────── -->
     <footer class="footer">
-      <span>Manifest V3 • Prompt & DLP Firewall</span>
+      <span>MV3 · 3-Tier Firewall Engine</span>
+      <span class="footer-dot">·</span>
+      <span id="footer-rule-count">33 rules active</span>
     </footer>
-  </div>
 
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>
