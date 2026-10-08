@@ -1,0 +1,35 @@
+# Web Researcher Security Policy
+role_name: web_researcher
+description: Authorized to search and fetch public web pages. No shell, file, or email tools.
+default_action: DENY
+allowed_tools:
+  - web_search
+  - web_fetch
+
+tool_rules:
+  web_fetch:
+    allowed_domains:
+      - wikipedia.org
+      - arxiv.org
+      - github.com
+      - docs.python.org
+      - stackoverflow.com
+    blocked_patterns:
+      - "localhost"
+      - "127.0.0.1"
+      - "169.254."
+      - "10."
+      - "192.168."
+    max_payload_size: 32768
+    requires_approval: false
+
+  web_search:
+    blocked_patterns:
+      - "<script"
+      - "javascript:"
+      - "file://"
+    max_payload_size: 1024
+    requires_approval: false
+
+max_tool_calls_per_turn: 10
+require_hitl_for_elevated: true

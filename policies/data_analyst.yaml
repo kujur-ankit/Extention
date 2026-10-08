@@ -1,0 +1,28 @@
+# Data Analyst Security Policy
+role_name: data_analyst
+description: Authorized for read-only database analytics and safe CSV exports.
+default_action: DENY
+allowed_tools:
+  - sql_query
+  - export_csv
+
+tool_rules:
+  sql_query:
+    read_only: true
+    blocked_patterns:
+      - "\\b(drop|delete|insert|update|alter|truncate|create|grant|revoke|exec|execute)\\b"
+      - ";\\s*--"
+      - "information_schema"
+    max_payload_size: 4096
+    requires_approval: false
+
+  export_csv:
+    allowed_paths:
+      - "./sandbox/reports"
+      - "./reports"
+      - "sandbox/reports"
+    max_payload_size: 65536
+    requires_approval: false
+
+max_tool_calls_per_turn: 15
+require_hitl_for_elevated: true

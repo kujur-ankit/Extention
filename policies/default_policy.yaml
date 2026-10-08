@@ -1,0 +1,7 @@
+# Default Security Policy (Least Privilege Default Deny)
+role_name: default
+description: Base policy for unregistered agents. Default deny for all tools.
+default_action: DENY
+allowed_tools: []
+max_tool_calls_per_turn: 0
+require_hitl_for_elevated: true
