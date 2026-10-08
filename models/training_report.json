@@ -1,0 +1,13 @@
+{
+  "trained_timestamp": "2026-10-08T02:18:18.355083+00:00",
+  "framework": "PyTorch 2.12",
+  "epochs": 25,
+  "test_accuracy": 100.0,
+  "total_samples": 402,
+  "classes": [
+    "ALLOWED",
+    "BLOCKED_SCOPE_VIOLATION",
+    "BLOCKED_PRIVACY_VIOLATION",
+    "BLOCKED_PROMPT_INJECTION"
+  ]
+}
